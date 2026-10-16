@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "id": "wise-files",
+  "revision": "v1.0.0",
+  "title": "명언 게시판 4 · 파일·JSON·검색",
+  "description": "종료 뒤에도 남는 자료와 검색·페이지를 만들어요.",
+  "sources": [
+    "https://slog.gg/p/14145"
+  ],
+  "sections": [
+    {
+      "id": "reading-1",
+      "title": "메모리와 파일은 수명이 달라요",
+      "body": "메모리 목록은 프로그램을 종료하면 사라져요.\n파일에 쓰고 다시 읽으면 다음 실행에도 남아요.\nUTF-8로 한글을 같은 방식으로 읽고 써요.\nJSON은 자료를 주고받는 텍스트 형식이에요.\n이번 문제는 문자열 배열 형식만 다뤄요.\n범용 JSON 파서를 만드는 문제는 아니에요.\n따옴표·역슬래시·줄바꿈·탭을 이스케이프해요.\n실제 서비스에서는 검증된 JSON 라이브러리를 써요.\n조심하세요. 문자열을 쉼표로만 나누면 깨져요.\n명언 내용에도 쉼표나 따옴표가 올 수 있거든요.\n"
+    },
+    {
+      "id": "reading-2",
+      "title": "검색한 뒤 페이지 나누기",
+      "body": "전체 자료를 먼저 검색 조건으로 걸러요.\n그 결과에 페이지 번호와 크기를 적용해요.\n페이지는 1부터 시작하기로 정해요.\n건너뛸 수는 `(page - 1) * size`예요.\n범위를 넘는 페이지는 빈 목록을 반환해요.\n자료가 없는 첫 실행도 정상 상태로 다뤄요.\n이번 범위에서는 MySQL 연결은 다루지 않아요.\n"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "json-persistence",
+      "title": "문자열 배열 저장·복원·페이지",
+      "goal": "`save(Path,List<String>)`, `load(Path)`를 구현하세요.\nUTF-8 JSON 문자열 배열로 저장해요.\n따옴표·역슬래시·개행·탭의 왕복을 보장하세요.\n없는 파일은 빈 목록이에요.\n`page(List<String>,String,int,int)`는 검색 후 페이지예요.",
+      "language": "junit",
+      "entry_file": "Exercise.java",
+      "starter_code": "class Exercise {\n    // 필요한 메서드를 여기에 작성하세요.\n}\n",
+      "solution": "import java.util.*;\nimport java.nio.file.*;\nimport java.io.IOException;\nclass Exercise {\n    static void save(Path file, List<String> rows) throws IOException {\n        // JSON 문자열은 역슬래시와 따옴표를 먼저 보호해요.\n        var escaped = rows.stream().map(s -> \"\\\"\" + s.replace(\"\\\\\",\"\\\\\\\\\").replace(\"\\\"\",\"\\\\\\\"\").replace(\"\\n\",\"\\\\n\").replace(\"\\r\",\"\\\\r\").replace(\"\\t\",\"\\\\t\") + \"\\\"\").toList();\n        Files.writeString(file, \"[\" + String.join(\",\", escaped) + \"]\", java.nio.charset.StandardCharsets.UTF_8);\n    }\n    static List<String> load(Path file) throws IOException {\n        // 존재하지 않는 파일은 첫 실행으로 취급해요.\n        if (!Files.exists(file)) return List.of();\n        String text = Files.readString(file).trim();\n        // 문자열의 시작과 끝을 직접 따라가며 배열을 복원해요.\n        var rows = new ArrayList<String>();\n        int i = 1;\n        if (!text.startsWith(\"[\") || !text.endsWith(\"]\")) throw new IOException(\"JSON 배열\");\n        while (i < text.length() - 1) {\n            // 항목 사이 구분자를 건너뛰고 여는 따옴표를 확인해요.\n            while (Character.isWhitespace(text.charAt(i)) || text.charAt(i) == ',') i++;\n            if (text.charAt(i++) != '\"') throw new IOException(\"JSON 문자열\");\n            var value = new StringBuilder(); boolean closed = false;\n            // 닫는 따옴표를 만날 때까지 문자열 하나를 읽어요.\n            while (i < text.length() - 1) {\n                char c = text.charAt(i++);\n                if (c == '\"') { closed = true; break; }\n                if (c == '\\\\') {\n                    // 이스케이프는 두 문자를 실제 문자 하나로 바꿔요.\n                    if (i >= text.length() - 1) throw new IOException(\"이스케이프\");\n                    char escaped = text.charAt(i++);\n                    c = switch (escaped) { case 'n' -> '\\n'; case 'r' -> '\\r'; case 't' -> '\\t'; case '\"' -> '\"'; case '\\\\' -> '\\\\'; default -> throw new IOException(\"이스케이프\"); };\n                }\n                value.append(c);\n            }\n            if (!closed) throw new IOException(\"닫는 따옴표\");\n            // 정상적으로 닫힌 문자열만 결과 목록에 넣어요.\n            rows.add(value.toString());\n        }\n        return rows;\n    }\n    static List<String> page(List<String> rows, String keyword, int page, int size) {\n        if (page < 1 || size < 1) throw new IllegalArgumentException(\"페이지\");\n        // 검색한 결과를 기준으로 페이지를 잘라요.\n        return rows.stream().filter(s -> s.contains(keyword)).skip((long)(page - 1) * size).limit(size).toList();\n    }\n}\n",
+      "files": {
+        "ExerciseTest.java": "import org.junit.jupiter.api.Test;\nimport static org.assertj.core.api.Assertions.*;\nclass ExerciseTest {\n@Test void roundTrip() throws Exception {\n    var dir = java.nio.file.Files.createTempDirectory(\"mq3-json\"); var file = dir.resolve(\"quotes.json\");\n    assertThat(Exercise.load(file)).isEmpty();\n    var rows = java.util.List.of(\"한글, 쉼표\", \"따옴표 \\\"\", \"역슬래시 \\\\\", \"줄\\n바꿈\", \"탭\\t문자\");\n    Exercise.save(file,rows); assertThat(Exercise.load(file)).isEqualTo(rows);\n    assertThat(java.nio.file.Files.readString(file)).startsWith(\"[\").endsWith(\"]\");\n    Exercise.save(file,java.util.List.of()); assertThat(Exercise.load(file)).isEmpty();\n}\n@Test void searchThenPage() {\n    var rows = java.util.List.of(\"a1\",\"b2\",\"a3\",\"a4\",\"b5\");\n    assertThat(Exercise.page(rows,\"a\",2,2)).containsExactly(\"a4\");\n    assertThat(Exercise.page(rows,\"없음\",1,2)).isEmpty();\n    assertThatThrownBy(() -> Exercise.page(rows,\"\",0,2)).isInstanceOf(IllegalArgumentException.class);\n}\n\n}\n",
+        "build.gradle": "plugins { id 'java' }\nrepositories { mavenCentral() }\njava { toolchain { languageVersion = JavaLanguageVersion.of(25) } }\ndependencies {\n    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'\n    testImplementation 'org.assertj:assertj-core:3.27.7'\n    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.13.4'\n}\nsourceSets { test { java { srcDirs = ['.']; include '*.java' } } }\ntest { useJUnitPlatform() }\n",
+        "settings.gradle": "rootProject.name = 'mq3-exercise'\n"
+      },
+      "tests": [],
+      "web_checks": [],
+      "mutations": [],
+      "required": true,
+      "narration": [
+        {
+          "action": "say",
+          "target": "problem",
+          "text": "`save(Path,List<String>)`, `load(Path)`를 구현하세요.\nUTF-8 JSON 문자열 배열로 저장해요.\n따옴표·역슬래시·개행·탭의 왕복을 보장하세요.\n없는 파일은 빈 목록이에요.\n`page(List<String>,String,int,int)`는 검색 후 페이지예요."
+        },
+        {
+          "action": "say",
+          "target": "editor",
+          "text": "조심하세요. 실행 성공과 모든 검사 통과는 달라요. 단계마다 결과를 확인해요."
+        },
+        {
+          "action": "set_code",
+          "code": "import java.util.*;\nimport java.nio.file.*;\nimport java.io.IOException;\nclass Exercise {\n    static void save(Path file, List<String> rows) throws IOException {/*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");}\n    static List<String> load(Path file) throws IOException {/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");}\n    static List<String> page(List<String> rows, String keyword, int page, int size) {/*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");}\n}\n",
+          "say": "선언과 생성자를 먼저 준비했어요. 메서드는 하나씩 채울게요."
+        },
+        {
+          "action": "run",
+          "expected_failure": true
+        },
+        {
+          "action": "say",
+          "target": "output",
+          "text": "아직 구현하지 않은 메서드가 있어요. 지금 실패하는 위치를 확인하세요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "\n        // JSON 문자열은 역슬래시와 따옴표를 먼저 보호해요.\n        var escaped = rows.stream().map(s -> \"\\\"\" + s.replace(\"\\\\\",\"\\\\\\\\\").replace(\"\\\"\",\"\\\\\\\"\").replace(\"\\n\",\"\\\\n\").replace(\"\\r\",\"\\\\r\").replace(\"\\t\",\"\\\\t\") + \"\\\"\").toList();\n/*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "say": "작은 조각을 채워요. 앞뒤의 변수와 조건을 함께 확인하세요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "        Files.writeString(file, \"[\" + String.join(\",\", escaped) + \"]\", java.nio.charset.StandardCharsets.UTF_8);\n    /*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-0*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": ""
+        },
+        {
+          "action": "run",
+          "expected_failure": true
+        },
+        {
+          "action": "say",
+          "target": "output",
+          "text": "실행 결과를 읽어보세요. 아직 남은 검사와 통과한 검사를 비교해요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "\n        // 존재하지 않는 파일은 첫 실행으로 취급해요.\n        if (!Files.exists(file)) return List.of();\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "say": "작은 조각을 채워요. 앞뒤의 변수와 조건을 함께 확인하세요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "        String text = Files.readString(file).trim();\n        // 문자열의 시작과 끝을 직접 따라가며 배열을 복원해요.\n        var rows = new ArrayList<String>();\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "        int i = 1;\n        if (!text.startsWith(\"[\") || !text.endsWith(\"]\")) throw new IOException(\"JSON 배열\");\n        while (i < text.length() - 1) {\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "            // 항목 사이 구분자를 건너뛰고 여는 따옴표를 확인해요.\n            while (Character.isWhitespace(text.charAt(i)) || text.charAt(i) == ',') i++;\n            if (text.charAt(i++) != '\"') throw new IOException(\"JSON 문자열\");\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "            var value = new StringBuilder(); boolean closed = false;\n            // 닫는 따옴표를 만날 때까지 문자열 하나를 읽어요.\n            while (i < text.length() - 1) {\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "                char c = text.charAt(i++);\n                if (c == '\"') { closed = true; break; }\n                if (c == '\\\\') {\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "                    // 이스케이프는 두 문자를 실제 문자 하나로 바꿔요.\n                    if (i >= text.length() - 1) throw new IOException(\"이스케이프\");\n                    char escaped = text.charAt(i++);\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "                    c = switch (escaped) { case 'n' -> '\\n'; case 'r' -> '\\r'; case 't' -> '\\t'; case '\"' -> '\"'; case '\\\\' -> '\\\\'; default -> throw new IOException(\"이스케이프\"); };\n                }\n                value.append(c);\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "            }\n            if (!closed) throw new IOException(\"닫는 따옴표\");\n            // 정상적으로 닫힌 문자열만 결과 목록에 넣어요.\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "            rows.add(value.toString());\n        }\n        return rows;\n/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "    /*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-1*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": ""
+        },
+        {
+          "action": "run",
+          "expected_failure": true
+        },
+        {
+          "action": "say",
+          "target": "output",
+          "text": "실행 결과를 읽어보세요. 아직 남은 검사와 통과한 검사를 비교해요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "\n        if (page < 1 || size < 1) throw new IllegalArgumentException(\"페이지\");\n        // 검색한 결과를 기준으로 페이지를 잘라요.\n/*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "say": "작은 조각을 채워요. 앞뒤의 변수와 조건을 함께 확인하세요."
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": "        return rows.stream().filter(s -> s.contains(keyword)).skip((long)(page - 1) * size).limit(size).toList();\n    /*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");"
+        },
+        {
+          "action": "patch_code",
+          "before": "/*mq3-step-2*/throw new UnsupportedOperationException(\"아직 구현 전이에요\");",
+          "after": ""
+        },
+        {
+          "action": "run",
+          "expected_failure": false
+        },
+        {
+          "action": "say",
+          "target": "output",
+          "text": "실행 결과를 읽어보세요. 아직 남은 검사와 통과한 검사를 비교해요."
+        }
+      ],
+      "source_hash": "fae1e0498339855ce55a16e96bb0bc6e7aaa69b92d81394a5c7a46d0ea18c552"
+    }
+  ]
+}
